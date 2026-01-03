@@ -381,6 +381,67 @@ class DownloadWorker(
                             FileUtil.deleteFile("${cachePath}/${infoJsonName}.info.json")
                         }
 
+                        // Attempt fallback for unavailable videos
+                        // Check both exception message and the actual log output
+                        val errorMessage = it.message ?: ""
+                        val logContent = logString.toString()
+                        val combinedErrorText = "$errorMessage\n$logContent"
+
+                        Log.d(TAG, "Download failed. Exception message: '$errorMessage'")
+                        Log.d(TAG, "Log content (last 500 chars): ${logContent.takeLast(500)}")
+
+                        val isUnavailableError = combinedErrorText.contains("unavailable", ignoreCase = true) ||
+                                combinedErrorText.contains("Video unavailable", ignoreCase = true) ||
+                                combinedErrorText.contains("not available", ignoreCase = true) ||
+                                combinedErrorText.contains("private video", ignoreCase = true) ||
+                                combinedErrorText.contains("deleted video", ignoreCase = true)
+
+                        if (isUnavailableError) {
+                            Log.d(TAG, "Detected unavailable video error for URL: ${downloadItem.url}")
+                            Log.d(TAG, "Error message: $errorMessage")
+
+                            val fallbackResult = runCatching {
+                                runBlocking {
+                                    ytdlpUtil.attemptUnavailableFallback(downloadItem.url)
+                                }
+                            }.getOrNull()
+
+                            if (fallbackResult != null) {
+                                val (formats, replacementUrl) = fallbackResult
+                                val fallbackMessage = "Original URL unavailable, attempting fallback to: $replacementUrl"
+                                logString.append("$fallbackMessage\n")
+                                Log.i(TAG, fallbackMessage)
+
+                                if (logDownloads) {
+                                    logRepo.update(fallbackMessage, logItem.id)
+                                }
+
+                                // Update downloadItem with the new URL
+                                downloadItem.url = replacementUrl
+                                downloadItem.status = DownloadRepository.Status.Queued.toString()
+                                runBlocking {
+                                    dao.update(downloadItem)
+                                }
+
+                                handler.postDelayed({
+                                    Toast.makeText(context, "Video unavailable. Retrying with alternative source...", Toast.LENGTH_LONG).show()
+                                }, 100)
+
+                                eventBus.post(WorkerProgress(0, "Retrying with alternative URL: $replacementUrl", downloadItem.id, downloadItem.logID))
+
+                                // Skip the error handling below and continue to next iteration
+                                return@onFailure
+                            } else {
+                                val fallbackFailMessage = "Fallback search failed: No alternative found"
+                                logString.append("$fallbackFailMessage\n")
+                                Log.w(TAG, fallbackFailMessage)
+
+                                if (logDownloads) {
+                                    logRepo.update(fallbackFailMessage, logItem.id)
+                                }
+                            }
+                        }
+
                         if (logDownloads){
                             logRepo.update(it.message ?: "", logItem.id)
                         }else{

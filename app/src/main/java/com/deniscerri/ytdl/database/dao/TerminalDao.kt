@@ -26,6 +26,9 @@ interface TerminalDao {
     @Query("UPDATE terminalDownloads set log=:l where id=:id")
     suspend fun updateTerminalLog(l: String, id: Long)
 
+    @Query("UPDATE terminalDownloads set command=:cmd where id=:id")
+    suspend fun updateCommand(cmd: String, id: Long)
+
     @Query("SELECT * FROM terminalDownloads WHERE id=:id LIMIT 1")
     fun getTerminalById(id: Long) : TerminalItem?
     @Transaction

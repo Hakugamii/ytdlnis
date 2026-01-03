@@ -2,6 +2,7 @@ package com.deniscerri.ytdl.database.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -49,6 +50,11 @@ class TerminalViewModel(private val application: Application) : AndroidViewModel
                     .putInt("id", item.id.toInt())
                     .putString("command", item.command)
                     .build()
+            )
+            .setBackoffCriteria(
+                BackoffPolicy.LINEAR,
+                5,
+                java.util.concurrent.TimeUnit.SECONDS
             )
             .addTag("terminal")
             .addTag(item.id.toString())

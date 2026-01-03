@@ -36,11 +36,15 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.lang.reflect.Type
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.Locale
@@ -51,6 +55,253 @@ class YTDLPUtil(private val context: Context, private val commandTemplateDao: Co
     private var sharedPreferences: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
     private val formatUtil = FormatUtil(context)
     private val handler = Handler(Looper.getMainLooper())
+
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .callTimeout(sharedPreferences.getString("socket_timeout", "5")!!.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    private data class OembedMeta(val title: String?, val author: String?)
+
+    private suspend fun fetchOembedMeta(url: String): OembedMeta? = withContext(Dispatchers.IO) {
+        return@withContext runCatching {
+            val encoded = URLEncoder.encode(url, "UTF-8")
+            val oembedUrl = "https://www.youtube.com/oembed?url=${encoded}&format=json"
+            Log.d("YTDLPUtil", "Fetching oEmbed from: $oembedUrl")
+
+            val request = Request.Builder()
+                .url(oembedUrl)
+                .get()
+                .build()
+            httpClient.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w("YTDLPUtil", "oEmbed fetch failed with status: ${resp.code}")
+                    return@runCatching null
+                }
+                val body = resp.body?.string().orEmpty()
+                Log.d("YTDLPUtil", "oEmbed response: $body")
+
+                val obj = JSONObject(body)
+                val rawAuthor = obj.optString("author_name")
+                // Remove " - Topic" suffix as it can interfere with search results
+                val author = rawAuthor.removeSuffix(" - Topic")
+                val meta = OembedMeta(obj.optString("title"), author)
+                Log.i("YTDLPUtil", "Extracted metadata - Title: ${meta.title}, Author: ${meta.author}")
+                meta
+            }
+        }.getOrElse { e ->
+            Log.e("YTDLPUtil", "Error fetching oEmbed: ${e.message}", e)
+            null
+        }
+    }
+
+    private suspend fun searchYoutubeReplacement(meta: OembedMeta): String? = withContext(Dispatchers.IO) {
+        val query = listOfNotNull(meta.title, meta.author).joinToString(" ").trim()
+        if (query.isBlank()) {
+            Log.w("YTDLPUtil", "Empty search query, cannot search for replacement")
+            return@withContext null
+        }
+
+        val searchUrl = "ytsearch1:${query}"
+        Log.i("YTDLPUtil", "Searching YouTube with query: $searchUrl")
+
+        return@withContext runCatching {
+            val request = YoutubeDLRequest(searchUrl)
+            request.applyDefaultOptionsForFetchingData(null)
+            request.addOption("--print", "%(webpage_url)s")
+            request.addOption("--match-filter", "!is_live")
+
+            val resp = YoutubeDL.getInstance().execute(request)
+            val url = resp.out.lineSequence().firstOrNull { Patterns.WEB_URL.matcher(it).find() }
+
+            if (url != null) {
+                Log.i("YTDLPUtil", "Found replacement URL: $url")
+            } else {
+                Log.w("YTDLPUtil", "No replacement URL found in search results")
+            }
+            url
+        }.getOrElse { e ->
+            Log.e("YTDLPUtil", "Error searching for replacement: ${e.message}", e)
+            null
+        }
+    }
+
+    suspend fun attemptUnavailableFallback(originalUrl: String): Pair<List<Format>, String>? {
+        Log.i("YTDLPUtil", "Attempting fallback for unavailable URL: $originalUrl")
+
+        val meta = fetchOembedMeta(originalUrl)
+        if (meta == null) {
+            Log.w("YTDLPUtil", "Failed to fetch oEmbed metadata for URL: $originalUrl")
+            return null
+        }
+
+        val replacementUrl = searchYoutubeReplacement(meta)
+        if (replacementUrl == null) {
+            Log.w("YTDLPUtil", "Failed to find replacement URL via search")
+            return null
+        }
+
+        Log.i("YTDLPUtil", "Fetching formats for replacement URL: $replacementUrl")
+        val formats = runCatching { getFormats(replacementUrl) }.getOrElse { e ->
+            Log.e("YTDLPUtil", "Failed to get formats for replacement URL: ${e.message}", e)
+            emptyList()
+        }
+
+        if (formats.isEmpty()) {
+            Log.w("YTDLPUtil", "No formats available for replacement URL")
+            return null
+        }
+
+        Log.i("YTDLPUtil", "Successfully found replacement with ${formats.size} formats")
+        return Pair(formats, replacementUrl)
+    }
+
+    /**
+     * Find a replacement URL for a single unavailable video without fetching formats
+     * Returns only the replacement video ID
+     */
+    suspend fun findReplacementVideoId(originalUrl: String): String? = withContext(Dispatchers.IO) {
+        Log.i("YTDLPUtil", "Finding replacement for unavailable URL: $originalUrl")
+
+        val meta = fetchOembedMeta(originalUrl) ?: run {
+            Log.w("YTDLPUtil", "Failed to fetch oEmbed metadata")
+            return@withContext null
+        }
+
+        val replacementUrl = searchYoutubeReplacement(meta) ?: run {
+            Log.w("YTDLPUtil", "Failed to find replacement via search")
+            return@withContext null
+        }
+
+        // Extract video ID from replacement URL
+        val videoIdMatch = Regex("""(?:v=|/)([a-zA-Z0-9_-]{11})""").find(replacementUrl)
+        val videoId = videoIdMatch?.groupValues?.get(1)
+
+        if (videoId != null) {
+            Log.i("YTDLPUtil", "Found replacement video ID: $videoId")
+        } else {
+            Log.w("YTDLPUtil", "Failed to extract video ID from replacement URL: $replacementUrl")
+        }
+
+        videoId
+    }
+
+    /**
+     * Pre-scan a playlist and replace unavailable videos BEFORE downloading
+     * This prevents wasted bandwidth from re-downloading already processed videos
+     * @param playlistUrl The playlist URL to preprocess
+     * @param progressCallback Optional callback to report progress (current index, total, status message)
+     */
+    suspend fun preprocessPlaylistForUnavailableVideos(
+        playlistUrl: String,
+        progressCallback: ((Int, Int, String) -> Unit)? = null
+    ): Pair<List<String>, Map<String, String>>? = withContext(Dispatchers.IO) {
+        try {
+            Log.i("YTDLPUtil", "Pre-scanning playlist for unavailable videos...")
+
+            // 1. Get all video IDs from playlist (flat extraction, no downloads)
+            val flatRequest = YoutubeDLRequest(playlistUrl)
+            flatRequest.applyDefaultOptionsForFetchingData(playlistUrl)
+            flatRequest.addOption("--flat-playlist")
+            flatRequest.addOption("--print", "%(id)s")
+
+            val flatResponse = runCatching {
+                YoutubeDL.getInstance().execute(flatRequest)
+            }.getOrElse { e ->
+                Log.e("YTDLPUtil", "Failed to extract playlist video IDs: ${e.message}", e)
+                return@withContext null
+            }
+
+            val videoIds = flatResponse.out.lines()
+                .filter { it.isNotBlank() && it.length == 11 } // YouTube video IDs are 11 chars
+                .distinct()
+
+            if (videoIds.isEmpty()) {
+                Log.w("YTDLPUtil", "No videos found in playlist")
+                return@withContext null
+            }
+
+            Log.i("YTDLPUtil", "Found ${videoIds.size} videos in playlist")
+
+            progressCallback?.invoke(0, videoIds.size, "Found ${videoIds.size} videos in playlist")
+
+            val processedUrls = mutableListOf<String>()
+            val replacements = mutableMapOf<String, String>()
+
+            // 2. Check each video for availability (quick check, no format fetching)
+            videoIds.forEachIndexed { index, videoId ->
+                val videoUrl = "https://www.youtube.com/watch?v=$videoId"
+                val progress = index + 1
+
+                progressCallback?.invoke(progress, videoIds.size, "Checking video $progress/${videoIds.size}: $videoId")
+
+                try {
+                    // Quick availability check using --simulate
+                    val checkRequest = YoutubeDLRequest(videoUrl)
+                    checkRequest.addOption("--simulate")
+                    checkRequest.addOption("--quiet")
+                    checkRequest.addOption("--no-warnings")
+                    checkRequest.addOption("--socket-timeout", "5")
+
+                    runCatching {
+                        YoutubeDL.getInstance().execute(checkRequest)
+                    }.getOrElse { e ->
+                        // Check if it's an unavailability error
+                        val errorMsg = e.message ?: ""
+                        if (errorMsg.contains("unavailable", ignoreCase = true) ||
+                            errorMsg.contains("private", ignoreCase = true) ||
+                            errorMsg.contains("deleted", ignoreCase = true) ||
+                            errorMsg.contains("removed", ignoreCase = true)) {
+
+                            Log.w("YTDLPUtil", "[$progress/${videoIds.size}] $videoId (unavailable)")
+                            progressCallback?.invoke(progress, videoIds.size, "Video $progress/${videoIds.size} unavailable, finding replacement...")
+
+                            // Try to find replacement
+                            val replacementId = findReplacementVideoId(videoUrl)
+                            if (replacementId != null && replacementId != videoId) {
+                                processedUrls.add("https://www.youtube.com/watch?v=$replacementId")
+                                replacements[videoId] = replacementId
+                                Log.i("YTDLPUtil", "Replaced with: $replacementId")
+                                progressCallback?.invoke(progress, videoIds.size, "Video $progress/${videoIds.size}: Found replacement ($videoId → $replacementId)")
+                                return@forEachIndexed
+                            } else {
+                                Log.w("YTDLPUtil", "No replacement found")
+                                progressCallback?.invoke(progress, videoIds.size, "Video $progress/${videoIds.size}: No replacement found for $videoId")
+                            }
+                        }
+                        throw e // Re-throw to be caught by outer try-catch
+                    }
+
+                    // Video is available
+                    processedUrls.add(videoUrl)
+                    Log.d("YTDLPUtil", "[$progress/${videoIds.size}] $videoId")
+                    progressCallback?.invoke(progress, videoIds.size, "Video $progress/${videoIds.size}: Available")
+
+                } catch (e: Exception) {
+                    // Keep original URL even if check fails
+                    processedUrls.add(videoUrl)
+                    Log.d("YTDLPUtil", "[$progress/${videoIds.size}] $videoId (error: ${e.message?.take(50)})")
+                    progressCallback?.invoke(progress, videoIds.size, "Video $progress/${videoIds.size}: Check failed, keeping original")
+                }
+            }
+
+            if (replacements.isNotEmpty()) {
+                Log.i("YTDLPUtil", "Pre-processing complete: ${replacements.size} replacement(s) made")
+                replacements.forEach { (original, replacement) ->
+                    Log.i("YTDLPUtil", "  $original → $replacement")
+                }
+            } else {
+                Log.i("YTDLPUtil", "Pre-processing complete: All videos available")
+            }
+
+            return@withContext Pair(processedUrls, replacements)
+
+        } catch (e: Exception) {
+            Log.e("YTDLPUtil", "Failed to preprocess playlist", e)
+            return@withContext null
+        }
+    }
 
     private fun YoutubeDLRequest.applyDefaultOptionsForFetchingData(url: String?) {
         addOption("--skip-download")
@@ -412,7 +663,21 @@ class YTDLPUtil(private val context: Context, private val commandTemplateDao: Co
                         println(url)
 
                         if (line.contains("unavailable")) {
-                            progress(ResultViewModel.MultipleFormatProgress(url, listOf(), true, line))
+                            val fallback = runCatching { runBlocking { attemptUnavailableFallback(url) } }.getOrNull()
+                            if (fallback != null) {
+                                val (formats, replacementUrl) = fallback
+                                formatCollection.add(formats.toMutableList())
+                                progress(
+                                    ResultViewModel.MultipleFormatProgress(
+                                        url,
+                                        formats,
+                                        false,
+                                        "Recovered via search: ${replacementUrl}"
+                                    )
+                                )
+                            } else {
+                                progress(ResultViewModel.MultipleFormatProgress(url, listOf(), true, line))
+                            }
                         }else{
                             val formatsJSON = JSONArray(line)
                             val formats = parseYTDLFormats(formatsJSON)
@@ -434,14 +699,28 @@ class YTDLPUtil(private val context: Context, private val commandTemplateDao: Co
                     runCatching {
                         val id = Regex("""\[.*?\] (\w+):""").find(line)!!.groupValues[1]
                         val url = urls.first { it.contains(id) }
-                        progress(
-                            ResultViewModel.MultipleFormatProgress(
-                                url,
-                                listOf(),
-                                true,
-                                line
+                        val fallback = runCatching { runBlocking { attemptUnavailableFallback(url) } }.getOrNull()
+                        if (fallback != null) {
+                            val (formats, replacementUrl) = fallback
+                            formatCollection.add(formats.toMutableList())
+                            progress(
+                                ResultViewModel.MultipleFormatProgress(
+                                    url,
+                                    formats,
+                                    false,
+                                    "Recovered via search: ${replacementUrl}"
+                                )
                             )
-                        )
+                        } else {
+                            progress(
+                                ResultViewModel.MultipleFormatProgress(
+                                    url,
+                                    listOf(),
+                                    true,
+                                    line
+                                )
+                            )
+                        }
                         delay(500)
                     }
                 }
@@ -1135,6 +1414,13 @@ class YTDLPUtil(private val context: Context, private val commandTemplateDao: Co
 
                         val emptyAuthor = downloadItem.author.isEmpty()
                         val usePlaylistMetadata = sharedPreferences.getBoolean("playlist_as_album", true)
+
+                        // First, save the original title as meta_title for metadata
+                        metadataCommands.addOption("--parse-metadata", "%(title)s:%(meta_title)s")
+
+                        // Then extract clean song title without artist prefix and use it as the main title
+                        // This removes "Artist - " prefix and optional suffixes like " (Official Video)"
+                        metadataCommands.addOption("--parse-metadata", """title:(?:.*?\s*-\s*)?(?P<title>.+?)(?:\s*[\(\[].*)?$""")
 
                         if (emptyAuthor) {
                             if (usePlaylistMetadata) {
