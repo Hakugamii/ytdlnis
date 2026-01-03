@@ -130,4 +130,3 @@ Exceto para o código-fonte licenciado sob a licença GPLv3, todas as outras par
 - [decipher3114](https://github.com/decipher3114) por disponibilizar o ícone do aplicativo
 
 e muitos outros estranhos do fórum da Internet.
-

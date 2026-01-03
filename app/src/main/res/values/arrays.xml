@@ -110,6 +110,7 @@
         <item>@string/sponsorblock_previews</item>
         <item>@string/sponsorblock_fillers</item>
         <item>@string/sponsorblock_reminders</item>
+        <item>@string/sponsorblock_hook</item>
     </string-array>
 
     <string-array name="sponsorblock_settings_values">
@@ -121,6 +122,7 @@
         <item>preview</item>
         <item>filler</item>
         <item>interaction</item>
+        <item>hook</item>
     </string-array>
 
     <string-array name="sponsorblock_settings_default">
@@ -142,6 +144,7 @@
         <item>Español</item>
         <item>فارسی</item>
         <item>Français</item>
+        <item>Hausa</item>
         <item>हिन्दी</item>
         <item>Hrvatski</item>
         <item>Magyar</item>
@@ -187,6 +190,7 @@
         <item>es</item>
         <item>fa</item>
         <item>fr</item>
+        <item>ha</item>
         <item>hi</item>
         <item>hr</item>
         <item>hu</item>
@@ -1586,4 +1590,5 @@
         <item>largest</item>
     </string-array>
 
+    <string name="sponsorblock_hook">Hook</string>
 </resources>

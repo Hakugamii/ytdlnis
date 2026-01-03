@@ -21,6 +21,13 @@
             app:summary="@string/defaultValue"
             app:title="@string/Theme" />
 
+        <Preference
+            android:defaultValue="default"
+            android:icon="@drawable/ic_frame"
+            android:title="@string/app_icon"
+            android:summary="@string/defaultValue"
+            app:key="ytdlnis_icon" />
+
         <ListPreference
             android:entries="@array/accents"
             android:entryValues="@array/accents_values"
@@ -198,6 +205,13 @@
             android:icon="@drawable/baseline_share2_24"
             android:key="show_terminal"
             app:title="@string/show_terminal" />
+
+        <SwitchPreferenceCompat
+            android:widgetLayout="@layout/preferece_material_switch"
+            app:defaultValue="false"
+            android:icon="@drawable/baseline_share2_24"
+            android:key="show_quick_download_share"
+            app:title="@string/show_quick_download_share_menu" />
 
         <SwitchPreferenceCompat
             android:widgetLayout="@layout/preferece_material_switch"

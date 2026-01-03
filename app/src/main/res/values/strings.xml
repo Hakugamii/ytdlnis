@@ -236,7 +236,7 @@
     <string name="errored_downloads">Errored downloads</string>
     <string name="errored_download_notification_channel_description">Notification for faulty downloads</string>
     <string name="quick_download">Quick download</string>
-    <string name="quick_download_summary">Don\'t fetch data in the download card</string>
+    <string name="quick_download_summary">Continue with the download process immediately, without fetching data beforehand</string>
     <string name="remove_audio">Remove audio</string>
     <string name="preferred_format_id">Preferred format ID</string>
     <string name="download_now">Download now</string>
@@ -487,7 +487,7 @@
     <string name="preferred_format_size">Preferred Format Size</string>
     <string name="smallest">Smallest</string>
     <string name="largest">Largest</string>
-    <string name="no_prefer_drc_audio">Don\'t prefer DRC Audio</string>
+    <string name="prefer_drc_audio">Prefer DRC Audio</string>
     <string name="potoken_gvs">PO Token (GVS)</string>
     <string name="potoken_player">PO Token (Player)</string>
     <string name="potoken_subs">PO Token (Subs)</string>
@@ -506,4 +506,7 @@
     <string name="potoken_guide">Auth\n-----------------------\n1. Click \'Auth\' to open the sign in page in WebView.\n2. Sign in to your Google Account.\n3. Play any video that supports auto-translated subtitles.\n4. Turn on auto-translated subtitles and see if it works.\n\t4.1 If auto-translated subtitles don\'t work, switch to another video that supports auto-translated subtitles and try step 4 again.\n5. Click OK.\n\nNo Auth\n-----------------------\n1. Click \'No Auth\'.\n2. Write any youtube video url\n3. Wait for the video to load and play the video for at least 3 seconds.\n4. Click OK.</string>
     <string name="no_auth">No Auth</string>
     <string name="auth">Auth</string>
+    <string name="app_icon">App Icon</string>
+    <string name="show_quick_download_share_menu">Show option to download immediately in the share menu</string>
+    <string name="quick_download_title">Don\'t fetch data</string>
 </resources>

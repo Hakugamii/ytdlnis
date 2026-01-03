@@ -20,6 +20,7 @@ import android.util.Patterns
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.os.bundleOf
 import androidx.core.view.ViewCompat
@@ -174,9 +175,10 @@ class ShareActivity : BaseActivity() {
             }
 
             val inputQuery = data.extractURL()
+            val ai = packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA)
 
             val type = intent.getStringExtra("TYPE")
-            val background = intent.getBooleanExtra("BACKGROUND", false)
+            val background = intent.getBooleanExtra("BACKGROUND", ai.metaData?.getBoolean("quick_run_background", false) == true)
 
             lifecycleScope.launch {
                 val result: ResultItem
@@ -198,6 +200,8 @@ class ShareActivity : BaseActivity() {
                     bundle.putSerializable("type", downloadType)
                     navController.setGraph(R.navigation.share_nav_graph, bundle)
                 }else{
+                    Toast.makeText(this@ShareActivity, "${getString(R.string.downloading)} $inputQuery", Toast.LENGTH_SHORT).show()
+
                     lifecycleScope.launch(Dispatchers.IO){
                         val downloadItem = downloadViewModel.createDownloadItemFromResult(
                             result = result,

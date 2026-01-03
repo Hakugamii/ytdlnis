@@ -151,4 +151,3 @@ A excepción del código fuente bajo la licencia GPLv3, todas las demás partes 
 - [decipher3114](https://github.com/decipher3114) por hacer que el ícono de la aplicación esté disponible
 
 y muchos otros extraños en foros de Internet.
-

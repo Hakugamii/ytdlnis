@@ -26,7 +26,7 @@
             android:icon="@drawable/ic_speed"
             android:key="quick_download"
             app:summary="@string/quick_download_summary"
-            app:title="@string/quick_download" />
+            app:title="@string/quick_download_title" />
         
         <ListPreference
             android:defaultValue="url_type"
@@ -66,13 +66,6 @@
             android:icon="@drawable/baseline_cookie_24"
             android:key="use_cookies"
             app:title="@string/use_cookies" />
-
-        <SwitchPreferenceCompat
-            android:widgetLayout="@layout/preferece_material_switch"
-            app:defaultValue="false"
-            android:icon="@drawable/baseline_note_24"
-            android:key="no_check_certificates"
-            app:title="@string/no_check_certificates" />
 
         <EditTextPreference
             android:icon="@drawable/baseline_network_locked_24"
